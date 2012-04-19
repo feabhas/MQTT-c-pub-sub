@@ -1,0 +1,2 @@
+/Users/akraisa/Documents/work/Training/MQTT/cmake/build/CMakeFiles/mqttpub.dir
+/Users/akraisa/Documents/work/Training/MQTT/cmake/build/CMakeFiles/mqttsub.dir
