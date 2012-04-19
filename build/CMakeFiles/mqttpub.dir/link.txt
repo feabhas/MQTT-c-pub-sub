@@ -1,1 +1,0 @@
-/usr/bin/gcc   -Wl,-search_paths_first -Wl,-headerpad_max_install_names   CMakeFiles/mqttpub.dir/pubmain/main.c.o CMakeFiles/mqttpub.dir/src/mqtt.c.o  -o mqttpub  

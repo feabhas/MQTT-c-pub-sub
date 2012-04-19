@@ -1,1 +1,0 @@
-/usr/bin/gcc   -Wl,-search_paths_first -Wl,-headerpad_max_install_names   CMakeFiles/mqttsub.dir/submain/main.c.o CMakeFiles/mqttsub.dir/src/mqtt.c.o  -o mqttsub  
