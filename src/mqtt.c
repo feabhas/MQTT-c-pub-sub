@@ -277,14 +277,13 @@ int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *ms
 	}
 	
 	// utf topic
-	uint8_t utf_topic[2+strlen(topic)+1]; // 2 for message size + 1 for '\0'
+	uint8_t utf_topic[2+strlen(topic)]; // 2 for message size QoS-0 does not have msg ID
     
     // set up topic payload
 	utf_topic[0] = 0;                       // MSB(strlen(topic));
 	utf_topic[1] = LSB(strlen(topic));
     strcpy((char *)&utf_topic[2], topic);
-	utf_topic[sizeof(utf_topic)-1] = '\0';  // terminate topic str correctly
-	
+		
 	uint8_t fixed_header[] = { SET_MESSAGE(PUBLISH), sizeof(utf_topic)+strlen(msg)};
 //    fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = PUBLISH, .remaining_length = sizeof(utf_topic)+strlen(msg) };
     	
