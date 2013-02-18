@@ -69,7 +69,7 @@ int main (int argc, char** argv)
         exit(1);
     }
   
-    int result = mqtt_subscribe(broker, topic);
+    int result = mqtt_subscribe(broker, topic, QoS0);
     
     if(result != 1) {
         puts("failed to Subscribe");

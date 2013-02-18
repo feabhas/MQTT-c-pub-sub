@@ -199,7 +199,7 @@ mqtt_broker_handle_t * mqtt_connect(const char* client, const char * server_ip, 
 
 
 
-int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic)
+int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic, QoS qos)
 {
 	if (!broker->connected) {
         return -1;
