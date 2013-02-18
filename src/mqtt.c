@@ -146,21 +146,25 @@ mqtt_broker_handle_t * mqtt_connect(const char* client, const char * server_ip, 
             PROTOCOL_VERSION,
             CLEAN_SESSION,
             MSB(KEEPALIVE),
-            LSB(KEEPALIVE),
-            0,                          // MSB(strlen(broker->clientid)) but doesn't work for > 127
-            strlen(broker->clientid)    // LSB(strlen(broker->clientid))
+            LSB(KEEPALIVE)
         };
-        
+
+        // set up payload for connect message
+        uint8_t payload[2+strlen(broker->clientid)];
+        payload[0] = 0;
+        payload[1] = strlen(broker->clientid);
+        memcpy(&payload[2],broker->clientid,strlen(broker->clientid));
+
         // fixed header: 2 bytes, big endian
-        uint8_t fixed_header[] = { SET_MESSAGE(CONNECT), sizeof(var_header)+strlen(broker->clientid) };
+        uint8_t fixed_header[] = { SET_MESSAGE(CONNECT), sizeof(var_header)+sizeof(payload) };
 //      fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = CONNECT, .remaining_length = sizeof(var_header)+strlen(broker->clientid) };
         
-        uint8_t packet[sizeof(fixed_header)+sizeof(var_header)+strlen(broker->clientid)];
+        uint8_t packet[sizeof(fixed_header)+sizeof(var_header)+sizeof(payload)];
         
         memset(packet,0,sizeof(packet));
         memcpy(packet,fixed_header,sizeof(fixed_header));
         memcpy(packet+sizeof(fixed_header),var_header,sizeof(var_header));
-        memcpy(packet+sizeof(fixed_header)+sizeof(var_header),broker->clientid,strlen(broker->clientid));
+        memcpy(packet+sizeof(fixed_header)+sizeof(var_header),payload,sizeof(payload));
         
         // send Connect message
         if (send(broker->socket, packet, sizeof(packet), 0) < sizeof(packet)) {
