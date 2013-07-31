@@ -10,3 +10,7 @@ cd build
 cmake ..
 make
 
+note on OSX need
+
+cmake -G "Unix Makefiles" ..
+

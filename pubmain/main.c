@@ -75,7 +75,7 @@ int main (int argc, char** argv)
  
     for(int i = 1; i <= count; ++i) {
         sprintf(msg, "Message number %d", i);
-        if(mqtt_publish(broker, topic, msg) == -1) { 
+        if(mqtt_publish(broker, topic, msg, QoS1) == -1) {
             printf("publish failed\n");
         }
         else {

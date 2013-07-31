@@ -45,7 +45,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #define PROTOCOL_VERSION    3U          // version 3.0 of MQTT
 #define CLEAN_SESSION       (1U<<1)
 #define KEEPALIVE           30U         // specified in seconds
-#define MESSAGE_ID  1U // not used by QoS 0 - value must be > 0
+#define MESSAGE_ID          1U // not used by QoS 0 - value must be > 0
 
 /* Macros for accessing the MSB and LSB of a uint16_t */
 #define MSB(A) ((uint8_t)((A & 0xFF00) >> 8))
@@ -84,13 +84,15 @@ typedef enum {
 
 struct mqtt_broker_handle
 {
-	int socket;
-	struct sockaddr_in socket_address;
-	uint16_t port;
-	char hostname[128];
-	char clientid[32];
-	bool connected;
-    size_t topic;
+	int                 socket;
+	struct sockaddr_in  socket_address;
+	uint16_t            port;
+	char                hostname[16];  // based on xxx.xxx.xxx.xxx format
+	char                clientid[24];  // max 23 charaters long
+	bool                connected;
+    size_t              topic;
+    uint16_t            pubMsgID;
+    uint16_t            subMsgID;
 };
 
 typedef struct fixed_header_t
@@ -106,7 +108,7 @@ typedef struct fixed_header_t
 
 mqtt_broker_handle_t * mqtt_connect(const char* client, const char * server_ip, uint32_t port)
 {
-    mqtt_broker_handle_t *broker = calloc(sizeof(mqtt_broker_handle_t), 1) ;
+    mqtt_broker_handle_t *broker = (mqtt_broker_handle_t *)calloc(sizeof(mqtt_broker_handle_t), 1) ;
     if(broker != 0) {
         // check connection strings are within bounds
         if ( (strlen(client)+1 > sizeof(broker->clientid)) || (strlen(server_ip)+1 > sizeof(broker->hostname))) {
@@ -146,21 +148,25 @@ mqtt_broker_handle_t * mqtt_connect(const char* client, const char * server_ip, 
             PROTOCOL_VERSION,
             CLEAN_SESSION,
             MSB(KEEPALIVE),
-            LSB(KEEPALIVE),
-            0,                          // MSB(strlen(broker->clientid)) but doesn't work for > 127
-            strlen(broker->clientid)    // LSB(strlen(broker->clientid))
+            LSB(KEEPALIVE)
         };
-        
+
+        // set up payload for connect message
+        uint8_t payload[2+strlen(broker->clientid)];
+        payload[0] = 0;
+        payload[1] = strlen(broker->clientid);
+        memcpy(&payload[2],broker->clientid,strlen(broker->clientid));
+
         // fixed header: 2 bytes, big endian
-        uint8_t fixed_header[] = { SET_MESSAGE(CONNECT), sizeof(var_header)+strlen(broker->clientid) };
+        uint8_t fixed_header[] = { SET_MESSAGE(CONNECT), sizeof(var_header)+sizeof(payload) };
 //      fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = CONNECT, .remaining_length = sizeof(var_header)+strlen(broker->clientid) };
         
-        uint8_t packet[sizeof(fixed_header)+sizeof(var_header)+strlen(broker->clientid)];
+        uint8_t packet[sizeof(fixed_header)+sizeof(var_header)+sizeof(payload)];
         
         memset(packet,0,sizeof(packet));
         memcpy(packet,fixed_header,sizeof(fixed_header));
         memcpy(packet+sizeof(fixed_header),var_header,sizeof(var_header));
-        memcpy(packet+sizeof(fixed_header)+sizeof(var_header),broker->clientid,strlen(broker->clientid));
+        memcpy(packet+sizeof(fixed_header)+sizeof(var_header),payload,sizeof(payload));
         
         // send Connect message
         if (send(broker->socket, packet, sizeof(packet), 0) < sizeof(packet)) {
@@ -173,7 +179,7 @@ mqtt_broker_handle_t * mqtt_connect(const char* client, const char * server_ip, 
         long sz = recv(broker->socket, buffer, sizeof(buffer), 0);  // wait for CONNACK
         //        printf("buffer size is %ld\n",sz);
         //        printf("%2x:%2x:%2x:%2x\n",(uint8_t)buffer[0],(uint8_t)buffer[1],(uint8_t)buffer[2],(uint8_t)buffer[3]);
-        if( (GET_MESSAGE(buffer[0]) == CONNACK) && (buffer[3] == Connection_Accepted) ) {
+        if( (GET_MESSAGE(buffer[0]) == CONNACK) && ((sz-2)==buffer[1]) && (buffer[3] == Connection_Accepted) ) {
             printf("Connected to MQTT Server at %s:%4d\n",server_ip, port );
         }
         else
@@ -195,7 +201,7 @@ mqtt_broker_handle_t * mqtt_connect(const char* client, const char * server_ip, 
 
 
 
-int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic)
+int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic, QoS qos)
 {
 	if (!broker->connected) {
         return -1;
@@ -204,13 +210,13 @@ int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic)
 	uint8_t var_header[] = { MSB(MESSAGE_ID), LSB(MESSAGE_ID) };	// appended to end of PUBLISH message
     
 	// utf topic
-	uint8_t utf_topic[2+strlen(topic)+1]; // 2 for message size + 1 for '\0'
+	uint8_t utf_topic[2+strlen(topic)+1]; // 2 for message size + 1 for QoS
     
     // set up topic payload
 	utf_topic[0] = 0;                       // MSB(strlen(topic));
 	utf_topic[1] = LSB(strlen(topic));
-    strcpy((char *)&utf_topic[2], topic);
-	utf_topic[sizeof(utf_topic)-1] = '\0';  // terminate str correctly
+    memcpy((char *)&utf_topic[2], topic, strlen(topic));
+	utf_topic[sizeof(utf_topic)-1] = qos; 
     
     uint8_t fixed_header[] = { SET_MESSAGE(SUBSCRIBE), sizeof(var_header)+sizeof(utf_topic)};
 //    fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = SUBSCRIBE, .remaining_length = sizeof(var_header)+strlen(utf_topic) };
@@ -233,8 +239,8 @@ int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic)
     //    printf("buffer size is %ld\n",sz);
     //    printf("%2x:%2x:%2x:%2x:%2x\n",(uint8_t)buffer[0],(uint8_t)buffer[1],(uint8_t)buffer[2],(uint8_t)buffer[3],(uint8_t)buffer[4]);
     
-    if( (GET_MESSAGE(buffer[0]) == SUBACK) && (buffer[2] == MSB(MESSAGE_ID)) &&  (buffer[3] == LSB(MESSAGE_ID)) ) {
-        printf("Subscribed to MQTT Service %s\n", topic);
+    if((GET_MESSAGE(buffer[0]) == SUBACK) && ((sz-2) == buffer[1])&&(buffer[2] == MSB(MESSAGE_ID)) &&  (buffer[3] == LSB(MESSAGE_ID)) ) {
+        printf("Subscribed to MQTT Service %s with QoS %d\n", topic, buffer[4]);
     }
     else
     {
@@ -242,23 +248,77 @@ int mqtt_subscribe(mqtt_broker_handle_t *broker, const char *topic)
         return -1;
     }
     broker->topic = strlen(topic);
+    struct timeval tv;
+    
+    tv.tv_sec = 30;  /* 30 Secs Timeout */
+    tv.tv_usec = 0;  // Not init'ing this can cause strange errors
+    
+    setsockopt(broker->socket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,sizeof(struct timeval));
 	return 1;
 }
 
+int SetSocketTimeout(int connectSocket, int milliseconds)
+{
+    struct timeval tv;
+
+    tv.tv_sec = milliseconds / 1000 ;
+    tv.tv_usec = ( milliseconds % 1000) * 1000  ;
+
+    return setsockopt (connectSocket, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof tv);
+}
 
 void mqtt_display_message(mqtt_broker_handle_t *broker, int (*print)(int))
 {
     uint8_t buffer[128];
+    SetSocketTimeout(broker->socket, 30000);
+
     while(1) {
         // wait for next message
         long sz = recv(broker->socket, buffer, sizeof(buffer), 0);
-        
+        //printf("message size is %ld\n",sz);        
         // if more than ack - i.e. data > 0
+        if (sz == 0)
+        {
+           /* Socket has been disconnected */
+           printf("\nSocket EOF\n");
+
+           close(broker->socket);
+           broker->socket = 0;
+           return;
+        }
+
+        if(sz < 0)
+        {
+           printf("\nSocket recv returned %ld, errno %d %s\n",sz,errno, strerror(errno));
+
+           close(broker->socket); /* Close socket if we get an error */
+           broker->socket = 0;
+           exit(0);
+        }
+
         if(sz > 0) {
             //printf("message size is %ld\n",sz);
             if( GET_MESSAGE(buffer[0]) == PUBLISH) {                
-                //printf("Got PUBLISH message with payload size %d\n", (uint8_t)buffer[1]);
-                for (unsigned long i = 4+(broker->topic); i < sz; ++i) { 
+                //printf("Got PUBLISH message with size %d\n", (uint8_t)buffer[1]);
+                uint32_t topicSize = (buffer[2]<<8) + buffer[3];
+                //printf("topic size is %d\n", topicSize);
+                //for(int loop = 0; loop < topicSize; ++loop) {
+                //    putchar(buffer[4+loop]);
+                //}
+                //putchar('\n');
+                unsigned long i = 4+topicSize;
+                if (((buffer[0]>>1) & 0x03) > QoS0) {
+                    uint32_t messageId = (buffer[4+topicSize] << 8) + buffer[4+topicSize+1];
+                    //printf("Message ID is %d\n", messageId);
+                    i += 2; // 2 extra for msgID
+                    // if QoS1 the send PUBACK with message ID
+                    uint8_t puback[4] = { SET_MESSAGE(PUBACK), 2, buffer[4+topicSize], buffer[4+topicSize+1] };
+                    if (send(broker->socket, puback, sizeof(puback), 0) < sizeof(puback)) {
+                        puts("failed to PUBACK");
+                        return;
+                    }
+                }
+                for ( ; i < sz; ++i) { 
                     print(buffer[i]);
                 }
                 print('\n');
@@ -270,32 +330,80 @@ void mqtt_display_message(mqtt_broker_handle_t *broker, int (*print)(int))
 }
 
 
-int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *msg)
+int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *msg, QoS qos)
 {
 	if (!broker->connected) {
         return -1;
 	}
+    if(qos > QoS2) {
+        return -1;
+    }
 	
-	// utf topic
-	uint8_t utf_topic[2+strlen(topic)]; // 2 for message size QoS-0 does not have msg ID
-    
-    // set up topic payload
-	utf_topic[0] = 0;                       // MSB(strlen(topic));
-	utf_topic[1] = LSB(strlen(topic));
-    strcpy((char *)&utf_topic[2], topic);
-		
-	uint8_t fixed_header[] = { SET_MESSAGE(PUBLISH), sizeof(utf_topic)+strlen(msg)};
-//    fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = PUBLISH, .remaining_length = sizeof(utf_topic)+strlen(msg) };
-    	
-	uint8_t packet[sizeof(fixed_header)+sizeof(utf_topic)+strlen(msg)];
-    
-	memset(packet, 0, sizeof(packet));
-	memcpy(packet, &fixed_header, sizeof(fixed_header));
-	memcpy(packet+sizeof(fixed_header), utf_topic, sizeof(utf_topic));
-	memcpy(packet+sizeof(fixed_header)+sizeof(utf_topic), msg, strlen(msg));
-    
-	if (send(broker->socket, packet, sizeof(packet), 0) < sizeof(packet)) {
-		return -1;
+    if (qos == QoS0) {  
+        // utf topic
+        uint8_t utf_topic[2+strlen(topic)]; // 2 for message size QoS-0 does not have msg ID
+        
+        // set up topic payload
+        utf_topic[0] = 0;                       // MSB(strlen(topic));
+        utf_topic[1] = LSB(strlen(topic));
+        memcpy((char *)&utf_topic[2], topic, strlen(topic));
+            
+        uint8_t fixed_header[] = { SET_MESSAGE(PUBLISH)|(qos << 1), sizeof(utf_topic)+strlen(msg)};
+    //    fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = PUBLISH, .remaining_length = sizeof(utf_topic)+strlen(msg) };
+            
+        uint8_t packet[sizeof(fixed_header)+sizeof(utf_topic)+strlen(msg)];
+        
+        memset(packet, 0, sizeof(packet));
+        memcpy(packet, &fixed_header, sizeof(fixed_header));
+        memcpy(packet+sizeof(fixed_header), utf_topic, sizeof(utf_topic));
+        memcpy(packet+sizeof(fixed_header)+sizeof(utf_topic), msg, strlen(msg));
+        
+        if (send(broker->socket, packet, sizeof(packet), 0) < sizeof(packet)) {
+            return -1;
+        }
+    }
+    else {
+        broker->pubMsgID++;
+        // utf topic
+        uint8_t utf_topic[2+strlen(topic)+2]; // 2 extra for message size > QoS0 for msg ID
+        
+        // set up topic payload
+        utf_topic[0] = 0;                       // MSB(strlen(topic));
+        utf_topic[1] = LSB(strlen(topic));
+        memcpy((char *)&utf_topic[2], topic, strlen(topic));
+        utf_topic[sizeof(utf_topic)-2] = MSB(broker->pubMsgID);
+        utf_topic[sizeof(utf_topic)-1] = LSB(broker->pubMsgID);
+        
+        uint8_t fixed_header[] = { SET_MESSAGE(PUBLISH)|(qos << 1), sizeof(utf_topic)+strlen(msg)};
+        
+        uint8_t packet[sizeof(fixed_header)+sizeof(utf_topic)+strlen(msg)];
+        
+        memset(packet, 0, sizeof(packet));
+        memcpy(packet, &fixed_header, sizeof(fixed_header));
+        memcpy(packet+sizeof(fixed_header), utf_topic, sizeof(utf_topic));
+        memcpy(packet+sizeof(fixed_header)+sizeof(utf_topic), msg, strlen(msg));
+        
+        if (send(broker->socket, packet, sizeof(packet), 0) < sizeof(packet)) {
+            return -1;
+        }
+        if(qos == QoS1){
+            // expect PUBACK with MessageID
+            uint8_t buffer[4];
+            long sz = recv(broker->socket, buffer, sizeof(buffer), 0);  // wait for SUBACK
+            
+            //    printf("buffer size is %ld\n",sz);
+            //    printf("%2x:%2x:%2x:%2x:%2x\n",(uint8_t)buffer[0],(uint8_t)buffer[1],(uint8_t)buffer[2],(uint8_t)buffer[3],(uint8_t)buffer[4]);
+            
+            if((GET_MESSAGE(buffer[0]) == PUBACK) && ((sz-2) == buffer[1]) && (buffer[2] == MSB(broker->pubMsgID)) &&  (buffer[3] == LSB(broker->pubMsgID)) ) {
+                printf("Published to MQTT Service %s with QoS1\n", topic);
+            }
+            else
+            {
+                puts("failed to publisg at QoS1");
+                return -1;
+            }
+        }
+        
     }
     
 	return 1;
