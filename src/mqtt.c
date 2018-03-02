@@ -330,7 +330,7 @@ void mqtt_display_message(mqtt_broker_handle_t *broker, int (*print)(int))
 }
 
 
-int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *msg, QoS qos)
+int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *msg, QoS qos, bool retain)
 {
 	if (!broker->connected) {
         return -1;
@@ -348,7 +348,7 @@ int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *ms
         utf_topic[1] = LSB(strlen(topic));
         memcpy((char *)&utf_topic[2], topic, strlen(topic));
             
-        uint8_t fixed_header[] = { SET_MESSAGE(PUBLISH)|(qos << 1), sizeof(utf_topic)+strlen(msg)};
+        uint8_t fixed_header[] = { (SET_MESSAGE(PUBLISH)|(qos << 1))+(retain?1:0), sizeof(utf_topic)+strlen(msg)};
     //    fixed_header_t  fixed_header = { .QoS = 0, .connect_msg_t = PUBLISH, .remaining_length = sizeof(utf_topic)+strlen(msg) };
             
         uint8_t packet[sizeof(fixed_header)+sizeof(utf_topic)+strlen(msg)];
@@ -374,7 +374,7 @@ int mqtt_publish(mqtt_broker_handle_t *broker, const char *topic, const char *ms
         utf_topic[sizeof(utf_topic)-2] = MSB(broker->pubMsgID);
         utf_topic[sizeof(utf_topic)-1] = LSB(broker->pubMsgID);
         
-        uint8_t fixed_header[] = { SET_MESSAGE(PUBLISH)|(qos << 1), sizeof(utf_topic)+strlen(msg)};
+        uint8_t fixed_header[] = { (SET_MESSAGE(PUBLISH)|(qos << 1))+(retain?1:0), sizeof(utf_topic)+strlen(msg)};
         
         uint8_t packet[sizeof(fixed_header)+sizeof(utf_topic)+strlen(msg)];
         
